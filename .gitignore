@@ -1,0 +1,13 @@
+node_modules/
+dist/
+data/
+.env
+
+# IDE 系
+.vscode/
+.idea/
+
+# ログ類
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

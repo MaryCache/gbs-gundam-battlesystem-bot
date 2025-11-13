@@ -1,0 +1,258 @@
+import { promises as fs } from "fs";
+import path from "path";
+import crypto from "crypto";
+import {
+  BoardMode,
+  BoardParticipant,
+  BoardState,
+} from "../types.js";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  StringSelectMenuBuilder,
+} from "discord.js";
+
+/* 盤面の保存先: data/boards/<channelId>.json */
+const DATA_DIR = path.resolve("data", "boards");
+
+async function ensureDir() {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+}
+
+function boardPath(channelId: string) {
+  return path.join(DATA_DIR, `${channelId}.json`);
+}
+
+/** 現在の盤面を読み込み（なければ null） */
+export async function loadBoard(channelId: string): Promise<BoardState | null> {
+  await ensureDir();
+  try {
+    const raw = await fs.readFile(boardPath(channelId), "utf8");
+    return JSON.parse(raw) as BoardState;
+  } catch {
+    return null;
+  }
+}
+
+/** 盤面を保存 */
+export async function saveBoard(state: BoardState): Promise<void> {
+  await ensureDir();
+  await fs.writeFile(boardPath(state.channelId), JSON.stringify(state, null, 2), "utf8");
+}
+
+/** 新規作成（上書き作成） */
+export async function createBoard(
+  channelId: string,
+  ownerId: string,
+  size: number,
+  mode: BoardMode
+): Promise<BoardState> {
+  const st: BoardState = {
+    channelId,
+    ownerId,
+    size,
+    mode,
+    members: [],
+    createdAt: Date.now(),
+  };
+  await saveBoard(st);
+  return st;
+}
+
+/** 参加者追加 */
+export async function addParticipant(channelId: string, name: string): Promise<BoardParticipant> {
+  const st = (await loadBoard(channelId))!;
+  const exists = st.members.find((m) => m.name === name);
+  if (exists) return exists;
+
+  const p: BoardParticipant = {
+    id: crypto.randomUUID(),
+    name,
+    pos: null,
+    tmp: null,
+    tmpArtsNo: undefined,
+    tmpTargetId: undefined,
+    tmpUlt: undefined,
+  };
+  st.members.push(p);
+  await saveBoard(st);
+  return p;
+}
+
+/** 参加者削除（id または name） */
+export async function removeParticipant(channelId: string, idOrName: string): Promise<boolean> {
+  const st = (await loadBoard(channelId))!;
+  const before = st.members.length;
+  st.members = st.members.filter((m) => !(m.id === idOrName || m.name === idOrName));
+  const changed = st.members.length !== before;
+  if (changed) await saveBoard(st);
+  return changed;
+}
+
+/** 一時移動（free: 即 pos、battle: tmp に入れる） */
+export async function setMove(
+  channelId: string,
+  participantId: string,
+  targetPos: number
+): Promise<BoardState> {
+  const st = (await loadBoard(channelId))!;
+  const m = st.members.find((x) => x.id === participantId);
+  if (!m) throw new Error("参加者が見つかりません。");
+
+  if (st.mode === "free") {
+    m.pos = targetPos;
+  } else {
+    m.tmp = targetPos;
+  }
+  await saveBoard(st);
+  return st;
+}
+
+/** 予約の一時入力（ARTS.No／対象／ULT） */
+export async function setReservationFields(
+  channelId: string,
+  participantId: string,
+  fields: { artsNo?: number | null; targetId?: string | null; ult?: boolean }
+): Promise<BoardState> {
+  const st = (await loadBoard(channelId))!;
+  const m = st.members.find((x) => x.id === participantId);
+  if (!m) throw new Error("参加者が見つかりません。");
+  if (fields.artsNo !== undefined)   m.tmpArtsNo   = fields.artsNo;
+  if (fields.targetId !== undefined) m.tmpTargetId = fields.targetId;
+  if (fields.ult !== undefined)      m.tmpUlt      = fields.ult;
+  await saveBoard(st);
+  return st;
+}
+
+/** 指定参加者の ULT を指定ON/OFF */
+export async function setUlt(channelId: string, participantId: string, value: boolean): Promise<BoardState> {
+  const st = (await loadBoard(channelId))!;
+  const m = st.members.find(x => x.id === participantId);
+  if (!m) throw new Error("参加者が見つかりません。");
+  m.tmpUlt = value;
+  await saveBoard(st);
+  return st;
+}
+
+/** 指定参加者の ULT をトグル（未設定は ON とする） */
+export async function toggleUlt(channelId: string, participantId: string): Promise<{ state: BoardState; on: boolean }> {
+  const st = (await loadBoard(channelId))!;
+  const m = st.members.find(x => x.id === participantId);
+  if (!m) throw new Error("参加者が見つかりません。");
+  const next = !(m.tmpUlt ?? false);
+  m.tmpUlt = next;
+  await saveBoard(st);
+  return { state: st, on: next };
+}
+
+/** battle モードで一斉確定（tmp を pos に反映／予約はクリア） */
+export async function commitAll(channelId: string): Promise<BoardState> {
+  const st = (await loadBoard(channelId))!;
+  for (const m of st.members) {
+    if (typeof m.tmp === "number") m.pos = m.tmp;
+    m.tmp = null;
+    m.tmpArtsNo = undefined;
+    m.tmpTargetId = undefined;
+    m.tmpUlt = undefined;
+  }
+  await saveBoard(st);
+  return st;
+}
+
+/** 盤面のEmbed/Componentsを生成（ボタンは確定/更新/削除の3つのみ） */
+export function renderBoard(state: BoardState): {
+  embed: EmbedBuilder;
+  components: Array<
+    ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>
+  >;
+} {
+  const lines: string[] = [];
+  lines.push("座標盤面");
+  lines.push("");
+
+  for (let i = 1; i <= state.size; i++) {
+    const onCell = state.members.filter((m) => m.pos === i).map((m) => m.name);
+    lines.push(`${i}: ${onCell.join(", ")}`);
+  }
+  lines.push("");
+  lines.push(`size: ${state.size} | mode: ${state.mode}`);
+
+  if (state.mode === "battle") {
+    const total = state.members.length;
+    const ready = state.members.filter((m: any) => typeof m.tmp === "number").length;
+    const note = ready === total && total > 0 ? "全員入力済み" : "入力待機中…";
+    lines.push(`(${ready}/${total}) ${note}`);
+  }
+
+  const embed = new EmbedBuilder()
+    .setDescription("```\n" + lines.join("\n") + "\n```")
+    .setColor(0x2b90d9);
+
+  const memberSelect = new StringSelectMenuBuilder()
+    .setCustomId("board:select-member")
+    .setPlaceholder("キャラを選択");
+  if (state.members.length > 0) {
+    memberSelect.addOptions(
+      state.members.slice(0, 25).map((m) => ({
+        label: m.name,
+        value: m.id,
+      }))
+    );
+  } else {
+    memberSelect
+      .addOptions([{ label: "（参加者なし）", value: "none" }])
+      .setDisabled(true);
+  }
+
+  const cappedSize = Math.max(1, Math.min(25, state.size));
+  const posSelect = new StringSelectMenuBuilder()
+    .setCustomId("board:select-pos")
+    .setPlaceholder(`座標を選択（1～${state.size}）`)
+    .addOptions(
+      Array.from({ length: cappedSize }, (_, i) => {
+        const v = (i + 1).toString();
+        return { label: v, value: v };
+      })
+    );
+
+  const artsSelect = new StringSelectMenuBuilder()
+    .setCustomId("board:select-arts")
+    .setPlaceholder("ARTS.No を選択（0=行動なし）")
+    .addOptions(
+      Array.from({ length: 21 }, (_, i) => {
+        const v = i.toString();
+        return { label: v, value: v };
+      })
+    );
+
+  const targetSelect = new StringSelectMenuBuilder()
+    .setCustomId("board:select-target")
+    .setPlaceholder("対象を選択（任意）");
+  if (state.members.length > 0) {
+    targetSelect.addOptions(
+      [{ label: "（対象なし）", value: "none" } as any].concat(
+        state.members.slice(0, 24).map((m) => ({ label: m.name, value: m.id }))
+      )
+    );
+  } else {
+    targetSelect.addOptions([{ label: "（対象なし）", value: "none" }]).setDisabled(true);
+  }
+
+  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("board:confirm").setLabel("確定").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("board:publish").setLabel("表示/更新").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("board:delete").setLabel("削除").setStyle(ButtonStyle.Danger),
+  );
+
+  const rows = [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(memberSelect),
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(posSelect),
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(artsSelect),
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(targetSelect),
+    buttons,
+  ];
+
+  return { embed, components: rows };
+}
