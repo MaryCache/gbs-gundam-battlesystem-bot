@@ -17,26 +17,52 @@
 - データ永続: JSON/SQLite（モジュール構成に依存）
 - ツール: pnpm or npm / tsx / dotenv
 
-## 🚀 Quick Start
+## 🚀 Quick Start (初心者向けガイド)
 
-1. **Discord Developer Portal** で Bot 作成、Privileged Intents を必要に応じてON  
-   （Presence/Members/Message Content 等）
-2. `.env` を作成（`.env.example` をコピー）
-3. 依存インストール & ビルド
-   ```
-   npm i
-   npm run build
-   ```
-4. 起動
-   ```
-   npm run start
-   ```
-5. スラッシュコマンド登録/削除
-   ```
-   npm run register:guild（高速反映/テスト向け）
-   npm run register:global（グローバル登録/数分～最長1時間の伝播遅延あり）
-   npm run unregister:guild（ギルドコマンド削除）
-   ```
+このBotを動かすには、パソコンに **[Node.js](https://nodejs.org/)** (推奨版) がインストールされている必要があります。
+
+### 1. Botアカウントの作成
+1. **[Discord Developer Portal](https://discord.com/developers/applications)** にアクセスし、「New Application」をクリックして名前を決めます。
+2. 左メニューの **Bot** を選び、「Reset Token」を押して **Token（パスワード）** をコピーし、メモ帳などに控えておきます。
+3. 同じページの下の方にある **Privileged Gateway Intents** の3つのスイッチ（Presence / Server Members / Message Content）をすべて **ON** にして「Save Changes」を押します。
+
+### 2. サーバーへの招待
+1. 左メニューの **OAuth2** > **URL Generator** を選びます。
+2. **SCOPES** で `bot` と `applications.commands` にチェックを入れます。
+3. **BOT PERMISSIONS** で `Administrator`（管理者）にチェックを入れます。
+4. 一番下に生成されたURLをコピーし、ブラウザで開いて自分のサーバーにBotを招待します。
+
+### 3. 設定ファイルの準備
+1. このフォルダにある `.env.example` というファイルをコピーして、名前を `.env` に変更します。
+2. `.env` をメモ帳などで開き、以下の情報を書き込みます。
+   - `DISCORD_TOKEN`: 手順1で控えたToken
+   - `APP_ID`: Developer Portalの **General Information** にある「Application ID」
+   - `GUILD_ID`: Botを動かすサーバーのID
+     - ※Discordの設定 > 詳細設定 > **開発者モード** をONにし、サーバーアイコンを右クリックして「サーバーIDをコピー」で取得できます。
+
+### 4. インストール & 起動
+このフォルダでターミナル（PowerShellやコマンドプロンプト）を開き、以下のコマンドを順番に入力してEnterを押します。
+
+```bash
+# 1. 必要なプログラムをインストール
+npm install
+
+# 2. Botをビルド（翻訳）する
+npm run build
+
+# 3. Botを起動する
+npm run start
+```
+「Logged in as...」と表示されれば起動成功です！
+
+### 5. コマンドの登録
+Botが起動した状態で、**別のターミナル**を開き（またはBotを一度 `Ctrl+C` で止めてから）、以下のコマンドを実行してスラッシュコマンドを使えるようにします。
+
+```bash
+# テスト用（指定したサーバーに即座に反映されます）
+npm run register:guild
+```
+これでDiscord上で `/` を入力すると、Botのコマンドが表示されるようになります。
    
 
 # 💻G.B.S - GundamBattleSystem Bot 取扱説明（ユーザー用）
